@@ -9,6 +9,7 @@ package com.margelo.nitro.com.mediatoolkit
 
 import androidx.annotation.Keep
 import com.facebook.proguard.annotations.DoNotStrip
+import java.util.Objects
 
 
 /**
@@ -34,6 +35,26 @@ data class GeneratePreviewOptions(
   val outputPath: String?
 ) {
   /* primary constructor */
+
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is GeneratePreviewOptions) return false
+    return Objects.deepEquals(this.fps, other.fps)
+      && Objects.deepEquals(this.durationMs, other.durationMs)
+      && Objects.deepEquals(this.maxWidth, other.maxWidth)
+      && Objects.deepEquals(this.quality, other.quality)
+      && Objects.deepEquals(this.outputPath, other.outputPath)
+  }
+
+  override fun hashCode(): Int {
+    return arrayOf(
+      fps,
+      durationMs,
+      maxWidth,
+      quality,
+      outputPath
+    ).contentDeepHashCode()
+  }
 
   companion object {
     /**
