@@ -142,6 +142,20 @@ const result = await MediaToolkit.trimVideo(videoUri, {
 });
 ```
 
+### Concatenate videos (no re-encode)
+
+```typescript
+const { durationSec } = await MediaToolkit.concatVideos(
+  [clip1Path, clip2Path, clip3Path],   // absolute local file paths
+  outputPath                            // absolute output path
+);
+```
+
+Joins multiple clips into one file via AVFoundation passthrough on iOS and Media3
+passthrough Transformer on Android — no decode/encode pass. Handles iOS HEVC clips
+that the FFmpeg `concat` demuxer cannot. Audio tracks are carried through if present
+and skipped silently if missing.
+
 ### Crop video
 
 ```typescript
@@ -333,6 +347,18 @@ Multi-transform image in a single pass. All options are **optional**.
 | `startTime` | `number` | **Required** | Trim start position in milliseconds |
 | `endTime` | `number` | **Required** | Trim end position in milliseconds |
 | `outputPath` | `string` | Optional | Absolute path for the output file. Defaults to a temp file. |
+
+### `concatVideos(clipPaths, outputPath): Promise<ConcatResult>`
+
+Joins clips in order without re-encoding. iOS uses `AVAssetExportPresetPassthrough`
+over an `AVMutableComposition`; Android uses a Media3 `Composition` of
+`EditedMediaItemSequence` with no effects (Transformer auto-selects the passthrough
+muxer). `ConcatResult.durationSec` is the sum of input durations in seconds.
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `clipPaths` | `string[]` | **Required** | Absolute local file paths (mov/mp4) to concatenate in order |
+| `outputPath` | `string` | **Required** | Absolute output path. Will be overwritten if it exists. The caller must ensure the parent directory exists. |
 
 ### `cropVideo(uri, options): Promise<MediaResult>`
 

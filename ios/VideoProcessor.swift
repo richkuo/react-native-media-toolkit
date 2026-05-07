@@ -886,6 +886,118 @@ class VideoProcessor: NSObject {
     }
   }
 
+  // ─── CONCAT (passthrough, no re-encode) ──────────────────────────────────
+
+  /// Concatenate multiple local video files into a single .mov using
+  /// AVFoundation's passthrough export. AVMutableComposition can carry
+  /// multiple SampleDescription entries per track, so this handles
+  /// HEVC parameter-set mismatches across iOS-recorded clips that the
+  /// FFmpeg `concat` demuxer can't.
+  @objc
+  static func concatVideos(
+    clipPaths: [String],
+    outputPath: String,
+    completion: @escaping (_ durationSec: Double, _ error: Error?) -> Void
+  ) {
+    if clipPaths.isEmpty {
+      completion(0, MediaToolkitError.invalidInput("concatVideos: clipPaths is empty"))
+      return
+    }
+
+    let composition = AVMutableComposition()
+    guard let compVideoTrack = composition.addMutableTrack(
+      withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
+    ) else {
+      completion(0, MediaToolkitError.processingFailed("Cannot create composition video track"))
+      return
+    }
+    let compAudioTrack = composition.addMutableTrack(
+      withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
+    )
+
+    var cumulative = CMTime.zero
+    var firstVideoTransform: CGAffineTransform?
+
+    for path in clipPaths {
+      let normalized = path.hasPrefix("file://") ? String(path.dropFirst(7)) : path
+      if !FileManager.default.fileExists(atPath: normalized) {
+        completion(0, MediaToolkitError.invalidInput("concatVideos: file not found: \(path)"))
+        return
+      }
+      let asset = AVURLAsset(url: URL(fileURLWithPath: normalized))
+      let assetDuration = asset.duration
+      if assetDuration == .invalid || assetDuration.seconds <= 0 {
+        completion(0, MediaToolkitError.invalidInput("concatVideos: invalid/empty duration: \(path)"))
+        return
+      }
+
+      guard let videoAssetTrack = asset.tracks(withMediaType: .video).first else {
+        completion(0, MediaToolkitError.processingFailed("concatVideos: no video track in: \(path)"))
+        return
+      }
+
+      do {
+        try compVideoTrack.insertTimeRange(
+          CMTimeRange(start: .zero, duration: assetDuration),
+          of: videoAssetTrack,
+          at: cumulative
+        )
+      } catch {
+        completion(0, MediaToolkitError.processingFailed(
+          "concatVideos: failed to insert video for \(path): \(error.localizedDescription)"))
+        return
+      }
+
+      if firstVideoTransform == nil {
+        firstVideoTransform = videoAssetTrack.preferredTransform
+        compVideoTrack.preferredTransform = videoAssetTrack.preferredTransform
+      }
+
+      // Audio is optional — silently skip clips that have no audio track.
+      if let audioAssetTrack = asset.tracks(withMediaType: .audio).first,
+         let compAudioTrack = compAudioTrack {
+        do {
+          try compAudioTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: assetDuration),
+            of: audioAssetTrack,
+            at: cumulative
+          )
+        } catch {
+          // Don't fail the whole export over one bad audio insert; continue.
+          NSLog("[MediaToolkit] concatVideos: skipping audio for %@: %@",
+                path, error.localizedDescription)
+        }
+      }
+
+      cumulative = CMTimeAdd(cumulative, assetDuration)
+    }
+
+    let outURL = URL(fileURLWithPath: outputPath)
+    removeIfExists(outURL)
+
+    guard let session = AVAssetExportSession(
+      asset: composition,
+      presetName: AVAssetExportPresetPassthrough
+    ) else {
+      completion(0, MediaToolkitError.processingFailed("Cannot create passthrough export session"))
+      return
+    }
+    session.outputURL = outURL
+    session.outputFileType = .mov
+    session.shouldOptimizeForNetworkUse = true
+
+    session.exportAsynchronously {
+      switch session.status {
+      case .completed:
+        completion(composition.duration.seconds, nil)
+      default:
+        let err = session.error ?? MediaToolkitError.processingFailed(
+          "concatVideos: export failed (\(session.status.rawValue))")
+        completion(0, err)
+      }
+    }
+  }
+
   // ─── Helpers ─────────────────────────────────────────────────────────────
 
   private static func loadAsset(_ uri: String) -> AVAsset? {
