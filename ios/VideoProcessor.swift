@@ -958,9 +958,14 @@ class VideoProcessor: NSObject {
       // Audio is optional — silently skip clips that have no audio track.
       if let audioAssetTrack = asset.tracks(withMediaType: .audio).first,
          let compAudioTrack = compAudioTrack {
+        // Clamp audio to the video trackDuration so audio that extends past
+        // the visible video (longer audio extent, container padding) cannot
+        // overlap the next clip — cumulative only advances by trackDuration.
+        let audioDuration = audioAssetTrack.timeRange.duration
+        let clampedAudio = CMTimeMinimum(audioDuration, trackDuration)
         do {
           try compAudioTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: audioAssetTrack.timeRange.duration),
+            CMTimeRange(start: .zero, duration: clampedAudio),
             of: audioAssetTrack,
             at: cumulative
           )
