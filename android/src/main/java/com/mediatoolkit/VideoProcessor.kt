@@ -597,8 +597,9 @@ internal object VideoProcessor {
     outFile.parentFile?.mkdirs()
     if (outFile.exists()) outFile.delete()
 
+    data class ClipMeta(val durationMs: Long, val hasAudio: Boolean)
+    val clipMetas = ArrayList<ClipMeta>(clipPaths.size)
     var totalDurationMs = 0L
-    val editedItems = ArrayList<EditedMediaItem>(clipPaths.size)
 
     val retriever = android.media.MediaMetadataRetriever()
     try {
@@ -620,16 +621,30 @@ internal object VideoProcessor {
         if (durationMs <= 0) {
           throw MediaToolkitException.InvalidInput("concatVideos: invalid duration for: $path")
         }
+        val hasAudio = retriever.extractMetadata(
+          android.media.MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO
+        ) != null
         totalDurationMs += durationMs
-
-        val mediaItem = MediaItem.Builder()
-          .setUri(toAndroidUri(path))
-          .build()
-        // No effects -> Media3 picks passthrough automatically.
-        editedItems.add(EditedMediaItem.Builder(mediaItem).build())
+        clipMetas.add(ClipMeta(durationMs, hasAudio))
       }
     } finally {
       retriever.release()
+    }
+
+    // EditedMediaItemSequence requires all items to share the same track layout.
+    // Strip audio from every clip when any clip lacks an audio track so the
+    // sequence is homogeneous.
+    val stripAudio = clipMetas.any { !it.hasAudio }
+
+    val editedItems = ArrayList<EditedMediaItem>(clipPaths.size)
+    for (path in clipPaths) {
+      val mediaItem = MediaItem.Builder()
+        .setUri(toAndroidUri(path))
+        .build()
+      // No effects -> Media3 picks passthrough automatically.
+      val itemBuilder = EditedMediaItem.Builder(mediaItem)
+      if (stripAudio) itemBuilder.setRemoveAudio(true)
+      editedItems.add(itemBuilder.build())
     }
 
     val sequence = EditedMediaItemSequence.Builder(editedItems).build()

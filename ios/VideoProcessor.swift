@@ -925,20 +925,22 @@ class VideoProcessor: NSObject {
         return
       }
       let asset = AVURLAsset(url: URL(fileURLWithPath: normalized))
-      let assetDuration = asset.duration
-      if assetDuration == .invalid || assetDuration.seconds <= 0 {
-        completion(0, MediaToolkitError.invalidInput("concatVideos: invalid/empty duration: \(path)"))
-        return
-      }
 
       guard let videoAssetTrack = asset.tracks(withMediaType: .video).first else {
         completion(0, MediaToolkitError.processingFailed("concatVideos: no video track in: \(path)"))
         return
       }
+      // Use the video track's own duration, not the container duration, to avoid
+      // A/V drift caused by moov-atom length mismatches or trailing container padding.
+      let trackDuration = videoAssetTrack.timeRange.duration
+      if trackDuration == .invalid || trackDuration.seconds <= 0 {
+        completion(0, MediaToolkitError.invalidInput("concatVideos: invalid/empty duration: \(path)"))
+        return
+      }
 
       do {
         try compVideoTrack.insertTimeRange(
-          CMTimeRange(start: .zero, duration: assetDuration),
+          CMTimeRange(start: .zero, duration: trackDuration),
           of: videoAssetTrack,
           at: cumulative
         )
@@ -958,21 +960,24 @@ class VideoProcessor: NSObject {
          let compAudioTrack = compAudioTrack {
         do {
           try compAudioTrack.insertTimeRange(
-            CMTimeRange(start: .zero, duration: assetDuration),
+            CMTimeRange(start: .zero, duration: audioAssetTrack.timeRange.duration),
             of: audioAssetTrack,
             at: cumulative
           )
         } catch {
-          // Don't fail the whole export over one bad audio insert; continue.
           NSLog("[MediaToolkit] concatVideos: skipping audio for %@: %@",
                 path, error.localizedDescription)
         }
       }
 
-      cumulative = CMTimeAdd(cumulative, assetDuration)
+      cumulative = CMTimeAdd(cumulative, trackDuration)
     }
 
     let outURL = URL(fileURLWithPath: outputPath)
+    try? FileManager.default.createDirectory(
+      at: outURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
     removeIfExists(outURL)
 
     guard let session = AVAssetExportSession(

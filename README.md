@@ -153,8 +153,13 @@ const { durationSec } = await MediaToolkit.concatVideos(
 
 Joins multiple clips into one file via AVFoundation passthrough on iOS and Media3
 passthrough Transformer on Android — no decode/encode pass. Handles iOS HEVC clips
-that the FFmpeg `concat` demuxer cannot. Audio tracks are carried through if present
-and skipped silently if missing.
+that the FFmpeg `concat` demuxer cannot. Audio tracks are carried through if all
+clips have audio; if any clip lacks an audio track, audio is stripped from all clips
+so the output has a consistent track layout.
+
+> **iOS:** All input clips must share the same orientation (portrait or landscape).
+> Mixing orientations produces a misrotated output — rotate clips to a consistent
+> orientation before concatenating.
 
 ### Crop video
 
@@ -355,10 +360,17 @@ over an `AVMutableComposition`; Android uses a Media3 `Composition` of
 `EditedMediaItemSequence` with no effects (Transformer auto-selects the passthrough
 muxer). `ConcatResult.durationSec` is the sum of input durations in seconds.
 
+**Audio:** All clips must have a consistent track layout. If any clip lacks an audio
+track, audio is stripped from all clips in the output.
+
+**iOS orientation:** All input clips must share the same orientation. Mixing portrait
+and landscape clips produces a misrotated result — normalize orientations before
+concatenating.
+
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `clipPaths` | `string[]` | **Required** | Absolute local file paths (mov/mp4) to concatenate in order |
-| `outputPath` | `string` | **Required** | Absolute output path. Will be overwritten if it exists. The caller must ensure the parent directory exists. |
+| `outputPath` | `string` | **Required** | Absolute output path. Will be overwritten if it exists. The parent directory is created automatically if it does not exist. |
 
 ### `cropVideo(uri, options): Promise<MediaResult>`
 
